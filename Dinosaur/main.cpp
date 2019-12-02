@@ -51,52 +51,58 @@
 
 void SetDefaults(cl::Platform &default_platform, cl::Device &default_device);
 
+void ConfiguracoesIniciais();
+
+void InicializarNovaPartida();
+void VerificarFimDePartida();
+void EncerrarPartida();
+
+void DinosaurLoop();
 void AplicarGravidade();
 void ControlarEstadoDinossauros();
 
 void RandomMutations();
 
-void InicializarNovaPartida();
-void EncerrarPartida();
-void VerificarFimDePartida();
-
-void ConfiguracoesIniciais();
-
 void CarregarRede();
+
+void CriarBuffers();
+void PopulateBuffers();
 
 
 //#########################################################################//
 
 
 int main() {
-	cl::Platform default_platform;
-	cl::Device default_device;
+	cl = new OpenCLElements();
 	
 
-	SetDefaults(default_platform, default_device);
-	std::cout << "Using platform: " << default_platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
-	std::cout << "Using device: " << default_device.getInfo<CL_DEVICE_NAME>() << std::endl;
+	SetDefaults(cl->default_platform, cl->default_device);
+	std::cout << "Using platform: " << cl->default_platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
+	std::cout << "Using device: " << cl->default_device.getInfo<CL_DEVICE_NAME>() << std::endl;
 
 
 	//##############################//
 
 
-	cl::Context context({ default_device });
+	
+	cl->context = cl::Context({ cl->default_device });
+	//cl::Context context({ default_device });
 	cl::Program::Sources sources;
 
 
 	sources.push_back({ kernel_code.c_str(), kernel_code.length() });
 
 
-	cl::Program program(context, sources);
-	if (program.build({ default_device }) != CL_SUCCESS) {
-		std::cout << "Error building: " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(default_device) << std::endl;
+	cl->program = cl::Program(cl->context, sources);
+	if (cl->program.build({ cl->default_device }) != CL_SUCCESS) {
+		std::cout << "Error building: " << cl->program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(cl->default_device) << std::endl;
 		system("pause");
 		exit(1);
 	}
 
 
-	cl::CommandQueue queue(context, default_device);
+	//cl::CommandQueue queue(context, default_device);
+	cl->queue = cl::CommandQueue(cl->context, cl->default_device);
 
 
 	//##############################//
@@ -110,14 +116,13 @@ int main() {
 
 		if (TimerTotal >= Periodo) {
 
-			MovimentarObstaculos();  // CPU
-			//MovimentarDinossauros(program, context, queue); // GPU
-			MovimentarDinossauros(); // CPU
-
 			AtualizarMelhorDinossauro(); // CPU
-			AplicarGravidade(); // GPU
-			AplicarColisao(); // GPU
-			ControlarEstadoDinossauros(); // GPU
+			MovimentarObstaculos();  // CPU
+
+
+			DinosaurLoop();
+			//MovimentarDinossauros(program, context, queue); // GPU
+			
 
 			if (fabs(VELOCIDADE) < 8) {
 				VELOCIDADE = VELOCIDADE - 0.0005;
@@ -195,40 +200,80 @@ void SetDefaults(cl::Platform &default_platform, cl::Device &default_device) {
 }
 
 
-//void AplicarGravidade() {
-//
-//	for (int i = 0; i < QuantidadeDinossauros; i++) {
-//
-//		if (Dinossauros[i].Y > 15) {
-//
-//			if (Dinossauros[i].Estado != 4) {         /// VOANDO
-//
-//				Dinossauros[i].VelocidadeY = Dinossauros[i].VelocidadeY - (0.08);
-//
-//			} 
-//			else {
-//
-//				if (Dinossauros[i].VelocidadeY <= 0) {
-//					Dinossauros[i].VelocidadeY = 0;
-//				} else {
-//					Dinossauros[i].VelocidadeY = Dinossauros[i].VelocidadeY - (0.08);
-//				}
-//
-//			}
-//
-//			Dinossauros[i].Y = Dinossauros[i].Y + Dinossauros[i].VelocidadeY;
-//
-//		} 
-//		else {
-//
-//			Dinossauros[i].VelocidadeY = 0;
-//			Dinossauros[i].Y = 15;
-//			if (Dinossauros[i].Estado == 2)
-//				Dinossauros[i].Estado = 0;
-//
-//		}
-//	}
-//}
+void ConfiguracoesIniciais() {
+
+	InicializarSprites();
+
+	AlocarDinossauros();
+	AlocarPonteiros();
+
+
+	TimerGeral = 0;
+	DistanciaRecorde = 0;
+	Geracao = 0;
+	MelhorDinossauro = &Dinossauros[0];
+
+	InicializarDNA();
+	InicializarNovaPartida();
+}
+
+
+void InicializarNovaPartida() {
+
+	GerarListaObstaculos();
+	// CarregarListaObstaculos();
+
+	DistanciaAtual = 0;
+	VELOCIDADE = -3;
+	DinossaurosMortos = 0;
+
+	InicializarObstaculos();
+
+	for (int i = 0; i < POPULACAO_TAMANHO; i++) {
+
+		InicializarDinossauro(i, DNADaVez[i], 300 + (rand() % 200 - 100), 15);
+
+	}
+
+	CriarBuffers();
+}
+
+void EncerrarPartida() {
+
+	if (DistanciaAtual > DistanciaRecorde) {
+
+		DistanciaRecorde = DistanciaAtual;
+		SalvarRedeArquivo();
+	}
+
+}
+
+void VerificarFimDePartida() {
+
+	if (DinossaurosMortos == POPULACAO_TAMANHO) {
+
+		EncerrarPartida();
+		RandomMutations();
+		InicializarNovaPartida();
+	}
+}
+
+
+void DinosaurLoop() {
+
+	// MoveDinosaurs
+	//MovimentarDinossauros(); // CPU
+
+	// Gravity
+	//AplicarGravidade(); // GPU
+
+	// Colision
+	//AplicarColisao(); // GPU
+
+	// State Update
+	//ControlarEstadoDinossauros(); // GPU
+
+}
 
 void AplicarGravidade() {
 
@@ -286,18 +331,15 @@ void ControlarEstadoDinossauros() {       /// Função responsavel por calcular a 
 			RNA_CopiarParaSaida(Dinossauros[i].Cerebro, Saida);         /// Extraindo a decisão para vetor ''saida''
 
 
-			if (Saida[0] == 0.0) { Pular = 0; }
-			else				 { Pular = 1; }
+			if (Saida[0] == 0.0) { Pular = 0; } else { Pular = 1; }
 
-			if (Saida[1] == 0.0) { Abaixar = 0; }	
-			else				 { Abaixar = 1; }
+			if (Saida[1] == 0.0) { Abaixar = 0; } else { Abaixar = 1; }
 
-			if (Saida[2] == 0.0) { Aviao = 0; }	
-			else				 { Aviao = 1; }
+			if (Saida[2] == 0.0) { Aviao = 0; } else { Aviao = 1; }
 
 
 			if (DINO_BRAIN_QTD_OUTPUT == 2) { Aviao = 0; }
-				
+
 
 			if (Dinossauros[i].Estado != 4) { /// Voando
 
@@ -311,10 +353,10 @@ void ControlarEstadoDinossauros() {       /// Função responsavel por calcular a 
 
 				if (Abaixar && Dinossauros[i].Estado == 2) {
 
-					if (Dinossauros[i].VelocidadeY > 0) { 
-						Dinossauros[i].VelocidadeY = 0; 
+					if (Dinossauros[i].VelocidadeY > 0) {
+						Dinossauros[i].VelocidadeY = 0;
 					}
-						
+
 					Dinossauros[i].Y = Dinossauros[i].Y - 2;
 				}
 
@@ -336,8 +378,7 @@ void ControlarEstadoDinossauros() {       /// Função responsavel por calcular a 
 					Dinossauros[i].AviaoCooldown = 4000.0;
 
 				}
-			} 
-			else {
+			} else {
 
 				if (Dinossauros[i].AviaoDeslocamento >= 820.0) {
 
@@ -357,33 +398,69 @@ void ControlarEstadoDinossauros() {       /// Função responsavel por calcular a 
 
 
 			if (Dinossauros[i].Estado == 0) { /// Em pé
-			
+
 				Dinossauros[i].SpriteAtual = 0 + Dinossauros[i].Frame;
 
 			}
 			if (Dinossauros[i].Estado == 1) { /// Deitado
-			
+
 				Dinossauros[i].SpriteAtual = 2 + Dinossauros[i].Frame;
 
 			}
 			if (Dinossauros[i].Estado == 2) { /// Pulando
-			
+
 				Dinossauros[i].SpriteAtual = 4 + Dinossauros[i].Frame;
 
 			}
 			if (Dinossauros[i].Estado == 3) { /// Muerto
-			
+
 				Dinossauros[i].SpriteAtual = 6 + Dinossauros[i].Frame;
 
 			}
 			if (Dinossauros[i].Estado == 4) {  /// Voando
-			
+
 				Dinossauros[i].SpriteAtual = 8 + Dinossauros[i].Frame;
 
 			}
 		}
 	}
 }
+
+
+//void AplicarGravidade() {
+//
+//	for (int i = 0; i < QuantidadeDinossauros; i++) {
+//
+//		if (Dinossauros[i].Y > 15) {
+//
+//			if (Dinossauros[i].Estado != 4) {         /// VOANDO
+//
+//				Dinossauros[i].VelocidadeY = Dinossauros[i].VelocidadeY - (0.08);
+//
+//			} 
+//			else {
+//
+//				if (Dinossauros[i].VelocidadeY <= 0) {
+//					Dinossauros[i].VelocidadeY = 0;
+//				} else {
+//					Dinossauros[i].VelocidadeY = Dinossauros[i].VelocidadeY - (0.08);
+//				}
+//
+//			}
+//
+//			Dinossauros[i].Y = Dinossauros[i].Y + Dinossauros[i].VelocidadeY;
+//
+//		} 
+//		else {
+//
+//			Dinossauros[i].VelocidadeY = 0;
+//			Dinossauros[i].Y = 15;
+//			if (Dinossauros[i].Estado == 2)
+//				Dinossauros[i].Estado = 0;
+//
+//		}
+//	}
+//}
 
 
 void RandomMutations() {
@@ -497,63 +574,6 @@ void RandomMutations() {
 }
 
 
-void InicializarNovaPartida() {
-
-	GerarListaObstaculos();
-	// CarregarListaObstaculos();
-
-	DistanciaAtual = 0;
-	VELOCIDADE = -3;
-	DinossaurosMortos = 0;
-
-	InicializarObstaculos();
-
-	for (int i = 0; i < POPULACAO_TAMANHO; i++) {
-
-		InicializarDinossauro(i, DNADaVez[i], 300 + (rand() % 200 - 100), 15);
-
-	}
-}
-
-void EncerrarPartida() {
-
-	if (DistanciaAtual > DistanciaRecorde) {
-
-		DistanciaRecorde = DistanciaAtual;
-		SalvarRedeArquivo();
-	}
-
-}
-
-void VerificarFimDePartida() {
-
-	if (DinossaurosMortos == POPULACAO_TAMANHO) {
-
-		EncerrarPartida();
-		RandomMutations();
-		InicializarNovaPartida();
-	}
-}
-
-
-void ConfiguracoesIniciais() {
-
-	InicializarSprites();
-
-	AlocarDinossauros();
-	AlocarPonteiros();
-
-
-	TimerGeral = 0;
-	DistanciaRecorde = 0;
-	Geracao = 0;
-	MelhorDinossauro = &Dinossauros[0];
-
-	InicializarDNA();
-	InicializarNovaPartida();
-}
-
-
 void CarregarRede() {
 
 	FILE* f = fopen("rede", "rb");
@@ -561,4 +581,45 @@ void CarregarRede() {
 	fread(DNADaVez[0], Dinossauros[0].TamanhoDNA, sizeof(float), f);
 	fclose(f);
 
+}
+
+
+void CriarBuffers() {
+
+	cl->b_d_states = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(int)*POPULACAO_TAMANHO);
+	cl->b_d_pos_x = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(float)*POPULACAO_TAMANHO);
+	cl->b_d_pos_y = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(float)*POPULACAO_TAMANHO);
+	cl->b_d_fitness = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(float)*POPULACAO_TAMANHO);
+	cl->b_d_speedy = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(float)*POPULACAO_TAMANHO);
+	cl->b_d_planemove = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(float)*POPULACAO_TAMANHO);
+	cl->b_d_planecool = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(float)*POPULACAO_TAMANHO);
+	cl->b_d_sprite = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(int)*POPULACAO_TAMANHO);
+
+	cl->b_d_dnas = cl::Buffer(cl->context, CL_MEM_READ_WRITE, sizeof(float)*DNATamanho*POPULACAO_TAMANHO);
+
+	cl->b_d_spritewidth = cl::Buffer(cl->context, CL_MEM_READ_ONLY, sizeof(int)*DINOSSAUROS_SPRITE_QUANTIDADE);
+	cl->b_d_spriteheight = cl::Buffer(cl->context, CL_MEM_READ_ONLY, sizeof(int)*DINOSSAUROS_SPRITE_QUANTIDADE);
+
+
+	cl->b_o_pos_x = cl::Buffer(cl->context, CL_MEM_READ_ONLY, sizeof(float)*MAX_OBSTACULOS);
+	cl->b_o_pos_y = cl::Buffer(cl->context, CL_MEM_READ_ONLY, sizeof(float)*MAX_OBSTACULOS);
+	cl->b_o_types = cl::Buffer(cl->context, CL_MEM_READ_ONLY, sizeof(int)*MAX_OBSTACULOS);
+
+	cl->b_o_spritewidth = cl::Buffer(cl->context, CL_MEM_READ_ONLY, sizeof(int)*OBSTACULOS_SPRITE_QUANTIDADE);
+	cl->b_o_spriteheight = cl::Buffer(cl->context, CL_MEM_READ_ONLY, sizeof(int)*OBSTACULOS_SPRITE_QUANTIDADE);
+
+	PopulateBuffers();
+}
+
+void PopulateBuffers() {
+	cl->queue.enqueueWriteBuffer(cl->b_d_states, CL_TRUE, 0, sizeof(int)*POPULACAO_TAMANHO, DinoEstados);
+	cl->queue.enqueueWriteBuffer(cl->b_d_pos_x, CL_TRUE, 0, sizeof(float)*POPULACAO_TAMANHO, DinoPosicoesX);
+	cl->queue.enqueueWriteBuffer(cl->b_d_pos_y, CL_TRUE, 0, sizeof(float)*POPULACAO_TAMANHO, DinoPosicoesY);
+	cl->queue.enqueueWriteBuffer(cl->b_d_fitness, CL_TRUE, 0, sizeof(float)*POPULACAO_TAMANHO, DinoFitness);
+	cl->queue.enqueueWriteBuffer(cl->b_d_speedy, CL_TRUE, 0, sizeof(float)*POPULACAO_TAMANHO, DinoVelocidadeY);
+	cl->queue.enqueueWriteBuffer(cl->b_d_planemove, CL_TRUE, 0, sizeof(float)*POPULACAO_TAMANHO, DinoDeslocamentoAviao);
+	cl->queue.enqueueWriteBuffer(cl->b_d_planecool, CL_TRUE, 0, sizeof(float)*POPULACAO_TAMANHO, DinoCooldownAviao);
+	cl->queue.enqueueWriteBuffer(cl->b_d_sprite, CL_TRUE, 0, sizeof(int)*POPULACAO_TAMANHO, DinoSpriteAtual);
+
+	cl->queue.enqueueWriteBuffer(cl->b_d_dnas, CL_TRUE, 0, sizeof(float)*DNATamanho*POPULACAO_TAMANHO, DinoDNA);
 }
